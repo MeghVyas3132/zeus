@@ -1,10 +1,10 @@
-import express from "express";
+import express, { type Express } from "express";
 import { runAgentRouter } from "./routes/run-agent.js";
 import { runQueryRouter } from "./routes/run-query.js";
 import { buildErrorEnvelope } from "./error-envelope.js";
 import { config } from "./config.js";
 
-export function createApp() {
+export function createApp(): Express {
   const app = express();
 
   app.use(express.json({ limit: "1mb" }));

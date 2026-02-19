@@ -20,7 +20,7 @@ COPY backend/gateway/src ./backend/gateway/src
 
 # Install deps using pnpm and build
 RUN pnpm install --frozen-lockfile || pnpm install
-RUN pnpm run build
+RUN pnpm --filter @rift/contracts run build && pnpm --filter @rift/gateway run build
 
 # ── Runtime stage ───────────────────────────────────────
 FROM node:20-alpine AS runtime

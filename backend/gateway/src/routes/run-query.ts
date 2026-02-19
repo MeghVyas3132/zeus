@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Router as RouterType } from "express";
 import { buildErrorEnvelope } from "../error-envelope.js";
 import { config } from "../config.js";
 import {
@@ -9,7 +9,7 @@ import {
 } from "../artifacts.js";
 import { runStore } from "../run-store.js";
 
-export const runQueryRouter = Router();
+export const runQueryRouter: RouterType = Router();
 
 runQueryRouter.get("/agent/status/:runId", async (req, res) => {
   const runId = req.params.runId;

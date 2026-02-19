@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Router } from "express";
+import { Router, type Router as RouterType } from "express";
 import type { RunAgentDuplicateResponse, RunAgentRequest, RunAgentResponse } from "@rift/contracts";
 import { formatBranchName } from "../branch.js";
 import { submissionFingerprint } from "../fingerprint.js";
@@ -7,7 +7,7 @@ import { schemaValidators, validateBody } from "../validators.js";
 import { buildErrorEnvelope } from "../error-envelope.js";
 import { runStore } from "../run-store.js";
 
-export const runAgentRouter = Router();
+export const runAgentRouter: RouterType = Router();
 
 runAgentRouter.post("/run-agent", validateBody("runAgentRequest"), (req, res) => {
   const payload = req.body as RunAgentRequest;

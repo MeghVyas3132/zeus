@@ -47,13 +47,13 @@ export async function writeResultsArtifact(
 export async function readResultsArtifact(outputsRoot: string, runId: string): Promise<ResultsJson> {
   const filePath = path.join(runOutputDir(outputsRoot, runId), "results.json");
   const raw = await readFile(filePath, "utf8");
-  const parsed = JSON.parse(raw) as unknown;
+  const parsed: unknown = JSON.parse(raw);
 
   if (!schemaValidators.results(parsed)) {
     throw new Error("Stored results.json violates contract");
   }
 
-  return parsed;
+  return parsed as ResultsJson;
 }
 
 export async function hasReportArtifact(outputsRoot: string, runId: string): Promise<boolean> {
