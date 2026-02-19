@@ -218,12 +218,31 @@ async def fix_generator(state: AgentState) -> AgentState:
     new_fixes: list[FixRecord] = []
 
     for i, failure in enumerate(failures):
-        file_path = Path(repo_dir) / failure.file_path
+        # Guard against None/empty file_path from LLM fallback
+        fp = failure.file_path or "unknown"
+        if fp == "unknown" or not fp.strip():
+            logger.warning("Skipping failure with unknown file path: %s", failure.error_message[:100])
+            new_fixes.append(
+                FixRecord(
+                    file_path=fp,
+                    bug_type=failure.bug_type,
+                    line_number=failure.line_number,
+                    description=failure.error_message,
+                    fix_description="Unknown file path — skipped",
+                    original_code="",
+                    fixed_code="",
+                    status="skipped",
+                    confidence=0.0,
+                )
+            )
+            continue
+
+        file_path = Path(repo_dir) / fp
         if not file_path.exists():
             logger.warning("File not found: %s", file_path)
             new_fixes.append(
                 FixRecord(
-                    file_path=failure.file_path,
+                    file_path=fp,
                     bug_type=failure.bug_type,
                     line_number=failure.line_number,
                     description=failure.error_message,
@@ -255,7 +274,7 @@ async def fix_generator(state: AgentState) -> AgentState:
         if fixed_code is None:
             new_fixes.append(
                 FixRecord(
-                    file_path=failure.file_path,
+                    file_path=fp,
                     bug_type=failure.bug_type,
                     line_number=failure.line_number,
                     description=failure.error_message,
@@ -268,7 +287,7 @@ async def fix_generator(state: AgentState) -> AgentState:
                 )
             )
             await emit_fix_applied(
-                run_id, failure.file_path, failure.bug_type,
+                run_id, fp, failure.bug_type,
                 failure.line_number, "failed", 0.0,
             )
             continue
@@ -278,7 +297,7 @@ async def fix_generator(state: AgentState) -> AgentState:
         confidence = 0.95 if model_used == "rule-based" else 0.75
 
         fix_record = FixRecord(
-            file_path=failure.file_path,
+            file_path=fp,
             bug_type=failure.bug_type,
             line_number=failure.line_number,
             description=failure.error_message,
@@ -294,7 +313,7 @@ async def fix_generator(state: AgentState) -> AgentState:
         # Persist to DB
         fix_id = await insert_fix(
             run_id,
-            file_path=failure.file_path,
+            file_path=fp,
             bug_type=failure.bug_type,
             line_number=failure.line_number,
             description=failure.error_message,
@@ -307,13 +326,13 @@ async def fix_generator(state: AgentState) -> AgentState:
         )
 
         await emit_fix_applied(
-            run_id, failure.file_path, failure.bug_type,
+            run_id, fp, failure.bug_type,
             failure.line_number, "applied", confidence,
         )
 
         await emit_thought(
             run_id, "fix_generator",
-            f"Fixed {failure.file_path}:{failure.line_number} ({failure.bug_type}) via {model_used}",
+            f"Fixed {fp}:{failure.line_number} ({failure.bug_type}) via {model_used}",
             step + i + 1,
         )
 

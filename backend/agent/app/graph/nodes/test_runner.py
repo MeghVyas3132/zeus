@@ -15,17 +15,91 @@ from ..state import AgentState
 
 logger = logging.getLogger("rift.node.test_runner")
 
-# Framework → command template
+# Framework → command template (universal: 30+ frameworks)
 _COMMANDS: dict[str, list[str]] = {
-    "pytest": ["python", "-m", "pytest", "--tb=short", "-q", "--no-header"],
-    "jest": ["npx", "jest", "--no-coverage", "--verbose"],
-    "vitest": ["npx", "vitest", "run", "--reporter=verbose"],
-    "mocha": ["npx", "mocha", "--recursive"],
-    "npm-test": ["npm", "test", "--", "--no-coverage"],
+    # ── Python ──
+    "pytest":       ["python", "-m", "pytest", "--tb=short", "-q", "--no-header"],
+    # ── JavaScript / TypeScript ──
+    "jest":         ["npx", "jest", "--no-coverage", "--verbose"],
+    "vitest":       ["npx", "vitest", "run", "--reporter=verbose"],
+    "mocha":        ["npx", "mocha", "--recursive"],
+    "ava":          ["npx", "ava", "--verbose"],
+    "tap":          ["npx", "tap"],
+    "jasmine":      ["npx", "jasmine"],
+    "cypress":      ["npx", "cypress", "run"],
+    "playwright":   ["npx", "playwright", "test"],
+    "npm-test":     ["npm", "test", "--", "--no-coverage"],
+    # ── Solidity (JS-based) ──
+    "hardhat":      ["npx", "hardhat", "test"],
+    "truffle":      ["npx", "truffle", "test"],
+    "forge-test":   ["forge", "test", "-vv"],
+    # ── .NET (C#, F#, VB.NET) ──
+    "dotnet-test":  ["dotnet", "test", "--verbosity", "normal"],
+    # ── Java / Kotlin / Groovy ──
+    "maven":        ["mvn", "test", "-B"],
+    "gradle":       ["./gradlew", "test"],
+    # ── Scala ──
+    "sbt-test":     ["sbt", "test"],
+    # ── Go ──
+    "go-test":      ["go", "test", "-v", "./..."],
+    # ── Rust ──
+    "cargo-test":   ["cargo", "test"],
+    # ── Ruby ──
+    "rspec":        ["bundle", "exec", "rspec"],
+    "minitest":     ["bundle", "exec", "rake", "test"],
+    "bundler":      ["bundle", "exec", "rake", "test"],
+    # ── PHP ──
+    "phpunit":      ["./vendor/bin/phpunit"],
+    # ── Swift ──
+    "swift-test":   ["swift", "test"],
+    # ── Dart / Flutter ──
+    "dart-test":    ["dart", "test"],
+    "flutter-test": ["flutter", "test"],
+    # ── Elixir ──
+    "mix-test":     ["mix", "test"],
+    # ── Haskell ──
+    "cabal-test":   ["cabal", "test"],
+    "stack-test":   ["stack", "test"],
+    # ── Clojure ──
+    "lein-test":    ["lein", "test"],
+    "clj-test":     ["clojure", "-M:test"],
+    # ── Lua ──
+    "busted":       ["busted", "--verbose"],
+    # ── R ──
+    "testthat":     ["Rscript", "-e", "testthat::test_dir('tests')"],
+    # ── Perl ──
+    "prove":        ["prove", "-v", "-r", "t"],
+    # ── Julia ──
+    "julia-test":   ["julia", "--project=.", "-e", "using Pkg; Pkg.test()"],
+    # ── Zig ──
+    "zig-test":     ["zig", "build", "test"],
+    # ── Nim ──
+    "nim-test":     ["nimble", "test"],
+    # ── C / C++ ──
+    "ctest":        ["ctest", "--test-dir", "build", "--output-on-failure"],
+    "make-test":    ["make", "test"],
 }
 
 # Frameworks that need `npm install` before running
-_NODE_FRAMEWORKS = {"jest", "vitest", "mocha", "npm-test"}
+_NODE_FRAMEWORKS = {
+    "jest", "vitest", "mocha", "ava", "tap", "jasmine",
+    "cypress", "playwright", "npm-test", "hardhat", "truffle",
+}
+
+# Frameworks that need a restore/build step before running tests
+_DOTNET_FRAMEWORKS = {"dotnet-test"}
+
+# Frameworks that need `bundle install` before running
+_RUBY_FRAMEWORKS = {"rspec", "minitest", "bundler"}
+
+# Frameworks that need `composer install` before running
+_PHP_FRAMEWORKS = {"phpunit"}
+
+# Frameworks that need `mix deps.get` before running
+_ELIXIR_FRAMEWORKS = {"mix-test"}
+
+# Frameworks that need `dart pub get` before running
+_DART_FRAMEWORKS = {"dart-test", "flutter-test"}
 
 
 async def _ensure_node_deps(repo_dir: str, run_id: str, step: int) -> None:
@@ -74,6 +148,165 @@ async def _ensure_node_deps(repo_dir: str, run_id: str, step: int) -> None:
         logger.warning("npm not found for run %s", run_id)
 
 
+async def _ensure_dotnet_deps(repo_dir: str, run_id: str, step: int) -> None:
+    """
+    Run `dotnet restore` then `dotnet build` to ensure test projects compile.
+    """
+    await emit_thought(run_id, "test_runner", "Restoring .NET dependencies…", step)
+
+    for cmd_label, cmd in [
+        ("dotnet restore", ["dotnet", "restore"]),
+        ("dotnet build", ["dotnet", "build", "--no-restore"]),
+    ]:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=repo_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env={**os.environ, "DOTNET_CLI_TELEMETRY_OPTOUT": "1"},
+            )
+            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
+            output = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+
+            if proc.returncode != 0:
+                logger.warning(
+                    "%s failed (exit=%d) for run %s: %s",
+                    cmd_label, proc.returncode, run_id, output[:500],
+                )
+                await emit_thought(
+                    run_id, "test_runner",
+                    f"{cmd_label} failed (exit={proc.returncode})",
+                    step,
+                )
+                return  # Don't continue to build if restore failed
+            else:
+                logger.info("%s succeeded for run %s", cmd_label, run_id)
+        except asyncio.TimeoutError:
+            logger.warning("%s timed out for run %s", cmd_label, run_id)
+            return
+        except FileNotFoundError:
+            logger.warning("dotnet SDK not found for run %s", run_id)
+            await emit_thought(run_id, "test_runner", "dotnet SDK not available", step)
+            return
+
+
+async def _ensure_ruby_deps(repo_dir: str, run_id: str, step: int) -> None:
+    """Run `bundle install` for Ruby projects."""
+    gemfile = Path(repo_dir) / "Gemfile"
+    if not gemfile.exists():
+        return
+    await emit_thought(run_id, "test_runner", "Installing Ruby dependencies…", step)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "bundle", "install", "--quiet",
+            cwd=repo_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
+        if proc.returncode != 0:
+            out = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+            logger.warning("bundle install failed (exit=%d) for run %s: %s", proc.returncode, run_id, out[:500])
+    except (asyncio.TimeoutError, FileNotFoundError):
+        logger.warning("bundle install failed/skipped for run %s", run_id)
+
+
+async def _ensure_php_deps(repo_dir: str, run_id: str, step: int) -> None:
+    """Run `composer install` for PHP projects."""
+    composer = Path(repo_dir) / "composer.json"
+    if not composer.exists():
+        return
+    await emit_thought(run_id, "test_runner", "Installing PHP dependencies…", step)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "composer", "install", "--no-interaction", "--quiet",
+            cwd=repo_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
+        if proc.returncode != 0:
+            out = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+            logger.warning("composer install failed (exit=%d) for run %s: %s", proc.returncode, run_id, out[:500])
+    except (asyncio.TimeoutError, FileNotFoundError):
+        logger.warning("composer install failed/skipped for run %s", run_id)
+
+
+async def _ensure_elixir_deps(repo_dir: str, run_id: str, step: int) -> None:
+    """Run `mix deps.get` for Elixir projects."""
+    mixfile = Path(repo_dir) / "mix.exs"
+    if not mixfile.exists():
+        return
+    await emit_thought(run_id, "test_runner", "Installing Elixir dependencies…", step)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "mix", "deps.get",
+            cwd=repo_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env={**os.environ, "MIX_ENV": "test"},
+        )
+        stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
+        if proc.returncode != 0:
+            out = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+            logger.warning("mix deps.get failed (exit=%d) for run %s: %s", proc.returncode, run_id, out[:500])
+    except (asyncio.TimeoutError, FileNotFoundError):
+        logger.warning("mix deps.get failed/skipped for run %s", run_id)
+
+
+async def _ensure_dart_deps(repo_dir: str, run_id: str, step: int) -> None:
+    """Run `dart pub get` or `flutter pub get` for Dart projects."""
+    pubspec = Path(repo_dir) / "pubspec.yaml"
+    if not pubspec.exists():
+        return
+    await emit_thought(run_id, "test_runner", "Installing Dart/Flutter dependencies…", step)
+    # Detect flutter vs plain dart
+    cmd = ["flutter", "pub", "get"] if (Path(repo_dir) / ".flutter-plugins").exists() else ["dart", "pub", "get"]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=repo_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
+        if proc.returncode != 0:
+            out = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+            logger.warning("dart pub get failed (exit=%d) for run %s: %s", proc.returncode, run_id, out[:500])
+    except (asyncio.TimeoutError, FileNotFoundError):
+        logger.warning("dart pub get failed/skipped for run %s", run_id)
+
+
+async def _ensure_cmake_build(repo_dir: str, run_id: str, step: int) -> None:
+    """Run cmake configure + build for C/C++ projects using ctest."""
+    cmake_lists = Path(repo_dir) / "CMakeLists.txt"
+    if not cmake_lists.exists():
+        return
+    build_dir = Path(repo_dir) / "build"
+    build_dir.mkdir(exist_ok=True)
+    await emit_thought(run_id, "test_runner", "Building C/C++ project with CMake…", step)
+    for cmd_label, cmd in [
+        ("cmake configure", ["cmake", ".."]),
+        ("cmake build", ["cmake", "--build", "."]),
+    ]:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=str(build_dir),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
+            if proc.returncode != 0:
+                out = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+                logger.warning("%s failed (exit=%d) for run %s: %s", cmd_label, proc.returncode, run_id, out[:500])
+                return
+        except (asyncio.TimeoutError, FileNotFoundError):
+            logger.warning("%s failed/skipped for run %s", cmd_label, run_id)
+            return
+
+
 async def test_runner(state: AgentState) -> AgentState:
     """
     Run the test suite in the cloned repo and capture output.
@@ -95,6 +328,30 @@ async def test_runner(state: AgentState) -> AgentState:
     # Install Node.js deps if needed (jest/vitest/mocha/npm-test)
     if framework in _NODE_FRAMEWORKS:
         await _ensure_node_deps(repo_dir, run_id, step)
+
+    # Restore + build .NET projects if needed
+    if framework in _DOTNET_FRAMEWORKS:
+        await _ensure_dotnet_deps(repo_dir, run_id, step)
+
+    # Ruby: bundle install
+    if framework in _RUBY_FRAMEWORKS:
+        await _ensure_ruby_deps(repo_dir, run_id, step)
+
+    # PHP: composer install
+    if framework in _PHP_FRAMEWORKS:
+        await _ensure_php_deps(repo_dir, run_id, step)
+
+    # Elixir: mix deps.get
+    if framework in _ELIXIR_FRAMEWORKS:
+        await _ensure_elixir_deps(repo_dir, run_id, step)
+
+    # Dart/Flutter: dart pub get
+    if framework in _DART_FRAMEWORKS:
+        await _ensure_dart_deps(repo_dir, run_id, step)
+
+    # C/C++ with CMake: cmake configure + build
+    if framework == "ctest":
+        await _ensure_cmake_build(repo_dir, run_id, step)
 
     cmd = _COMMANDS.get(framework, _COMMANDS["pytest"])
 
