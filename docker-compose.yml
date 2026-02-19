@@ -1,0 +1,75 @@
+services:
+  # ── PostgreSQL ────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rift}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rift_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-rift}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docs/SCHEMA.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rift}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Redis ─────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Gateway (Node / Express) ──────────────────────────────
+  gateway:
+    build:
+      context: .
+      dockerfile: backend/gateway/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      OUTPUTS_DIR: /app/outputs
+      DATABASE_URL: postgres://${POSTGRES_USER:-rift}:${POSTGRES_PASSWORD:-rift_secret}@postgres:5432/${POSTGRES_DB:-rift}
+      REDIS_URL: redis://redis:6379
+      AGENT_BASE_URL: http://agent:8001
+    volumes:
+      - outputs:/app/outputs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Agent (Python / FastAPI) ──────────────────────────────
+  agent:
+    build:
+      context: backend/agent
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${AGENT_PORT:-8001}:8001"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-rift}:${POSTGRES_PASSWORD:-rift_secret}@postgres:5432/${POSTGRES_DB:-rift}
+      REDIS_URL: redis://redis:6379
+      GATEWAY_BASE_URL: http://gateway:3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  outputs:
