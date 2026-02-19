@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Node
+node_modules/
+dist/
+coverage/
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+
+# Env
+.env
+.env.*
+
+# Runtime
+*.log
+outputs/*
+!outputs/.gitkeep

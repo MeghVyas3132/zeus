@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "socket-thought-event.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "node", "message", "step_index", "timestamp"],
+  "properties": {
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+    "node": { "type": "string", "minLength": 1 },
+    "message": { "type": "string", "minLength": 1 },
+    "step_index": { "type": "number", "minimum": 1 },
+    "timestamp": { "type": "string", "format": "date-time" }
+  }
+}

@@ -1,0 +1,9 @@
+[project]
+name = "rift-agent"
+version = "0.1.0"
+description = "RIFT 2026 autonomous CI/CD healing agent service"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

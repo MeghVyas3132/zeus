@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "socket-fix-applied.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "file", "bug_type", "line", "status", "confidence"],
+  "properties": {
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+    "file": { "type": "string", "minLength": 1 },
+    "bug_type": {
+      "type": "string",
+      "enum": ["LINTING", "SYNTAX", "LOGIC", "TYPE_ERROR", "IMPORT", "INDENTATION"]
+    },
+    "line": { "type": "number", "minimum": 1 },
+    "status": { "type": "string", "enum": ["applied", "failed", "rolled_back", "skipped"] },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "commit_sha": { "type": "string", "pattern": "^[a-f0-9]{7,40}$" }
+  }
+}

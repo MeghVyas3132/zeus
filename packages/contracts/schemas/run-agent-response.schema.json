@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "run-agent-response.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "branch_name", "status", "socket_room", "fingerprint"],
+  "properties": {
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+    "branch_name": { "type": "string", "pattern": "^[A-Z0-9_]+_[A-Z0-9_]+_AI_Fix$" },
+    "status": { "type": "string", "const": "queued" },
+    "socket_room": { "type": "string", "pattern": "^/run/[A-Za-z0-9_-]+$" },
+    "fingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "results.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "repo_url",
+    "team_name",
+    "leader_name",
+    "branch_name",
+    "final_status",
+    "total_failures",
+    "total_fixes",
+    "total_time_secs",
+    "score",
+    "fixes",
+    "ci_log"
+  ],
+  "properties": {
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+    "repo_url": {
+      "type": "string",
+      "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\\.git)?/?$"
+    },
+    "team_name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "leader_name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "branch_name": { "type": "string", "pattern": "^[A-Z0-9_]+_[A-Z0-9_]+_AI_Fix$" },
+    "final_status": { "type": "string", "enum": ["PASSED", "FAILED", "QUARANTINED"] },
+    "total_failures": { "type": "number", "minimum": 0 },
+    "total_fixes": { "type": "number", "minimum": 0 },
+    "total_time_secs": { "type": "number", "minimum": 0 },
+    "score": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base", "speed_bonus", "efficiency_penalty", "total"],
+      "properties": {
+        "base": { "type": "number" },
+        "speed_bonus": { "type": "number" },
+        "efficiency_penalty": { "type": "number" },
+        "total": { "type": "number" }
+      }
+    },
+    "fixes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "bug_type", "line_number", "commit_message", "status"],
+        "properties": {
+          "file": { "type": "string", "minLength": 1 },
+          "bug_type": {
+            "type": "string",
+            "enum": ["LINTING", "SYNTAX", "LOGIC", "TYPE_ERROR", "IMPORT", "INDENTATION"]
+          },
+          "line_number": { "type": "number", "minimum": 1 },
+          "commit_message": { "type": "string", "pattern": "^\\[AI-AGENT\\].+" },
+          "status": { "type": "string", "enum": ["FIXED", "FAILED"] }
+        }
+      }
+    },
+    "ci_log": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["iteration", "status", "timestamp", "regression"],
+        "properties": {
+          "iteration": { "type": "number", "minimum": 1 },
+          "status": { "type": "string", "enum": ["pending", "running", "passed", "failed"] },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "regression": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

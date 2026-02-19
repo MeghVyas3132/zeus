@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "socket-run-complete.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "final_status", "score", "total_time_secs", "pdf_url"],
+  "properties": {
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+    "final_status": { "type": "string", "enum": ["PASSED", "FAILED", "QUARANTINED"] },
+    "score": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base", "speed_bonus", "efficiency_penalty", "total"],
+      "properties": {
+        "base": { "type": "number" },
+        "speed_bonus": { "type": "number" },
+        "efficiency_penalty": { "type": "number" },
+        "total": { "type": "number" }
+      }
+    },
+    "total_time_secs": { "type": "number", "minimum": 0 },
+    "pdf_url": { "type": "string", "minLength": 1 }
+  }
+}

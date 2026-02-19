@@ -1,0 +1,21 @@
+{
+  "name": "rift-autonomous-healer",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "backend/gateway",
+    "packages/contracts"
+  ],
+  "scripts": {
+    "build": "npm run build -w @rift/contracts && npm run build -w @rift/gateway",
+    "typecheck": "npm run typecheck -w @rift/contracts && npm run typecheck -w @rift/gateway",
+    "test:gateway": "npm run test -w @rift/gateway",
+    "test:agent": "cd backend/agent && pytest -q",
+    "test": "npm run test -w @rift/gateway",
+    "test:contracts": "npm run test:contracts -w @rift/gateway",
+    "dev:gateway": "npm run dev -w @rift/gateway"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

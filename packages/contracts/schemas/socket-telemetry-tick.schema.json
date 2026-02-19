@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "socket-telemetry-tick.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "container_id", "cpu_pct", "mem_mb", "timestamp"],
+  "properties": {
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+    "container_id": { "type": "string", "minLength": 1 },
+    "cpu_pct": { "type": "number", "minimum": 0 },
+    "mem_mb": { "type": "number", "minimum": 0 },
+    "timestamp": { "type": "string", "format": "date-time" }
+  }
+}

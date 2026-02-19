@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "run-agent-request.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["repo_url", "team_name", "leader_name"],
+  "properties": {
+    "repo_url": {
+      "type": "string",
+      "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\\.git)?/?$"
+    },
+    "team_name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "leader_name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "requested_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[A-Za-z0-9._/-]+$"
+    }
+  }
+}

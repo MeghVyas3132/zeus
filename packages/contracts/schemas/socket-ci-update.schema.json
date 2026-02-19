@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "socket-ci-update.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "iteration", "status", "regression", "timestamp"],
+  "properties": {
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+    "iteration": { "type": "number", "minimum": 1 },
+    "status": { "type": "string", "enum": ["pending", "running", "passed", "failed"] },
+    "regression": { "type": "boolean" },
+    "timestamp": { "type": "string", "format": "date-time" }
+  }
+}
