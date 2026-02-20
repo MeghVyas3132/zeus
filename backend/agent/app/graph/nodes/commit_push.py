@@ -113,7 +113,10 @@ async def commit_push(state: AgentState) -> AgentState:
             origin.set_url(auth_url)
 
         try:
-            push_info = origin.push(branch_name)
+            # Force push to the healing branch — safe because we never push to
+            # protected branches (guarded above) and the branch is created per-run.
+            # This handles the case where a previous run already pushed to this branch.
+            push_info = origin.push(branch_name, force=True)
             if push_info:
                 first = push_info[0]
                 flags = getattr(first, "flags", 0)

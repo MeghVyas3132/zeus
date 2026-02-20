@@ -285,3 +285,14 @@ async def get_traces_for_run(run_id: str) -> list[dict[str, Any]]:
         run_id,
     )
     return [dict(r) for r in rows]
+
+
+async def save_report_pdf(run_id: str, pdf_bytes: bytes) -> None:
+    """Store the generated report PDF binary in the runs table."""
+    pool = await get_pool()
+    await pool.execute(
+        "UPDATE runs SET report_pdf = $2 WHERE run_id = $1",
+        run_id,
+        pdf_bytes,
+    )
+    logger.info("Saved report_pdf (%d bytes) for run %s", len(pdf_bytes), run_id)

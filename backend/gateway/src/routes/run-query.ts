@@ -80,6 +80,7 @@ runQueryRouter.get("/agent/status/:runId", async (req, res) => {
 runQueryRouter.get("/results/:runId", async (req, res) => {
   const runId = req.params.runId;
 
+  // 1️⃣ Try reading from the on-disk artifact first
   try {
     const payload = await readResultsArtifact(config.outputsDir, runId);
     return res.status(200).json(payload);
@@ -101,10 +102,79 @@ runQueryRouter.get("/results/:runId", async (req, res) => {
           .set("X-Results-Contract", "legacy")
           .json(legacyPayload);
       } catch {
-        // fall through
+        // fall through to DB fallback
       }
     }
+  }
 
+  // 2️⃣ DB fallback — construct results from PostgreSQL tables
+  try {
+    assertRunId(runId);
+    const pool = getPool();
+
+    const runRow = await pool.query(
+      `SELECT run_id, repo_url, team_name, leader_name, branch_name, status,
+              total_failures, total_fixes, total_time_secs,
+              base_score, speed_bonus, efficiency_penalty, final_score
+       FROM runs WHERE run_id = $1`, [runId]
+    );
+    if (runRow.rows.length === 0) {
+      return res.status(404).json(buildErrorEnvelope("NOT_FOUND", "Run not found"));
+    }
+    const run = runRow.rows[0];
+
+    const fixRows = await pool.query(
+      `SELECT file_path, bug_type, line_number, commit_message, status
+       FROM fixes WHERE run_id = $1 ORDER BY applied_at`, [runId]
+    );
+
+    const ciRows = await pool.query(
+      `SELECT iteration, status, triggered_at, regression_detected
+       FROM ci_events WHERE run_id = $1 ORDER BY iteration`, [runId]
+    );
+
+    const statusMap: Record<string, string> = {
+      passed: "PASSED", failed: "FAILED", quarantined: "QUARANTINED",
+      running: "FAILED", queued: "FAILED",
+    };
+
+    const fixStatusMap: Record<string, string> = {
+      applied: "FIXED", failed: "FAILED", rolled_back: "FAILED", skipped: "FAILED",
+    };
+
+    const payload = {
+      run_id: run.run_id,
+      repo_url: run.repo_url,
+      team_name: run.team_name,
+      leader_name: run.leader_name,
+      branch_name: run.branch_name,
+      final_status: statusMap[run.status] ?? "FAILED",
+      total_failures: run.total_failures ?? 0,
+      total_fixes: run.total_fixes ?? 0,
+      total_time_secs: run.total_time_secs ?? 0,
+      score: {
+        base: run.base_score ?? 0,
+        speed_bonus: run.speed_bonus ?? 0,
+        efficiency_penalty: run.efficiency_penalty ?? 0,
+        total: run.final_score ?? 0,
+      },
+      fixes: fixRows.rows.map((f: Record<string, unknown>) => ({
+        file: f.file_path as string,
+        bug_type: f.bug_type as string,
+        line_number: f.line_number as number,
+        commit_message: (f.commit_message as string) ?? "",
+        status: fixStatusMap[f.status as string] ?? "FAILED",
+      })),
+      ci_log: ciRows.rows.map((c: Record<string, unknown>) => ({
+        iteration: c.iteration as number,
+        status: c.status as string,
+        timestamp: (c.triggered_at as Date)?.toISOString?.() ?? new Date().toISOString(),
+        regression: (c.regression_detected as boolean) ?? false,
+      })),
+    };
+
+    return res.status(200).set("X-Results-Source", "database").json(payload);
+  } catch {
     return res.status(404).json(buildErrorEnvelope("NOT_FOUND", "results.json not found"));
   }
 });
@@ -114,18 +184,37 @@ runQueryRouter.get("/report/:runId", async (req, res) => {
 
   try {
     assertRunId(runId);
-    const hasReport = await hasReportArtifact(config.outputsDir, runId);
 
-    if (!hasReport) {
-      return res.status(404).json(buildErrorEnvelope("NOT_FOUND", "report.pdf not found"));
+    // Try local disk first
+    const hasReport = await hasReportArtifact(config.outputsDir, runId);
+    if (hasReport) {
+      return res.sendFile(reportArtifactPath(config.outputsDir, runId), {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="${runId}-report.pdf"`
+        }
+      });
     }
 
-    return res.sendFile(reportArtifactPath(config.outputsDir, runId), {
-      headers: {
+    // DB fallback — Railway has no shared volumes between services
+    const pool = getPool();
+    const { rows } = await pool.query(
+      "SELECT report_pdf FROM runs WHERE run_id = $1 LIMIT 1",
+      [runId]
+    );
+
+    if (rows.length > 0 && rows[0].report_pdf) {
+      const pdfBuffer: Buffer = rows[0].report_pdf;
+      res.set({
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${runId}-report.pdf"`
-      }
-    });
+        "Content-Disposition": `attachment; filename="${runId}-report.pdf"`,
+        "Content-Length": String(pdfBuffer.length),
+        "X-Report-Source": "database"
+      });
+      return res.send(pdfBuffer);
+    }
+
+    return res.status(404).json(buildErrorEnvelope("NOT_FOUND", "report.pdf not found"));
   } catch {
     return res.status(400).json(buildErrorEnvelope("INVALID_INPUT", "Invalid run_id"));
   }

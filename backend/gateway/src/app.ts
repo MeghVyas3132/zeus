@@ -11,6 +11,18 @@ export function createApp(): Express {
 
   app.use(express.json({ limit: "1mb" }));
 
+  // ── CORS — allow cross-origin requests from any frontend ──
+  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+    if (req.method === "OPTIONS") {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
+
   // ── Health check with real connectivity ──────────────────
   app.get("/health", async (_req, res) => {
     const checks: Record<string, string> = {

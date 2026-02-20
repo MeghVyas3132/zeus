@@ -6,6 +6,7 @@ import { useRunContext } from "@/context/RunContext";
 import Card from "@/components/Card";
 import StatusBadge from "@/components/StatusBadge";
 import ProgressBar from "@/components/ProgressBar";
+import { getReportUrl } from "@/lib/api";
 
 export default function RunSummaryCard() {
   const { state } = useRunContext();
@@ -16,6 +17,7 @@ export default function RunSummaryCard() {
   const teamName = results?.team_name;
 
   const isRunning = status === "running" || status === "queued";
+  const isTerminal = status === "passed" || status === "failed" || status === "quarantined";
 
   return (
     <Card
@@ -63,6 +65,23 @@ export default function RunSummaryCard() {
 
         {/* Progress */}
         <ProgressBar value={progressPct} />
+
+        {/* Download Report PDF — only when run is complete */}
+        {isTerminal && runId && (
+          <a
+            href={getReportUrl(runId)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium rounded-md
+                       bg-blue-600 text-white hover:bg-blue-700 transition-colors
+                       shadow-sm hover:shadow-md w-fit"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Download Report PDF
+          </a>
+        )}
       </div>
     </Card>
   );

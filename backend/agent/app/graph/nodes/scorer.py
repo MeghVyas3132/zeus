@@ -22,7 +22,7 @@ from ...config import (
     SCORE_SPEED_BONUS,
     SCORE_SPEED_THRESHOLD_SECS,
 )
-from ...db import insert_trace, update_run_status
+from ...db import insert_trace, save_report_pdf, update_run_status
 from ...events import emit_run_complete, emit_thought
 from ...report import generate_report_pdf
 from ..state import AgentState, ScoreBreakdown
@@ -163,6 +163,9 @@ async def scorer(state: AgentState) -> AgentState:
     try:
         pdf_path = output_dir / "report.pdf"
         generate_report_pdf(results, pdf_path)
+        # Store PDF binary in DB so gateway can serve it (Railway has no shared volumes)
+        pdf_bytes = pdf_path.read_bytes()
+        await save_report_pdf(run_id, pdf_bytes)
         await emit_thought(run_id, "scorer", "Generated report.pdf", step)
     except Exception:
         logger.exception("Failed to generate report.pdf for run %s", run_id)

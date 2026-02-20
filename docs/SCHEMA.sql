@@ -24,6 +24,7 @@ create table if not exists runs (
   total_iterations int,
   total_llm_cost_usd double precision,
   quarantine_reason text,
+  report_pdf bytea,
   created_at timestamptz not null default now()
 );
 

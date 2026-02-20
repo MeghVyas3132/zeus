@@ -21,8 +21,17 @@ COPY frontend/ frontend/
 # Build contracts first (if needed)
 RUN cd packages/contracts && pnpm run build 2>/dev/null || true
 
-# Build frontend
-RUN cd frontend && pnpm run build
+# Accept VITE_ build-time args from Railway env vars
+ARG VITE_API_BASE_URL=/api
+ARG VITE_SOCKET_URL=
+ARG VITE_SOCKET_PATH=/socket.io
+
+# Build frontend with injected env vars
+RUN cd frontend && \
+    VITE_API_BASE_URL=${VITE_API_BASE_URL} \
+    VITE_SOCKET_URL=${VITE_SOCKET_URL} \
+    VITE_SOCKET_PATH=${VITE_SOCKET_PATH} \
+    pnpm run build
 
 # ── Stage 2: Serve with nginx ──────────────────────────
 FROM nginx:alpine AS production
