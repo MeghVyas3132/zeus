@@ -1,5 +1,8 @@
 """
-Centralised LLM factory with round-robin Groq API key rotation.
+Centralised LLM factory with provider fallback.
+
+Primary: Groq (round-robin across keys).
+Fallback: OpenAI (single key).
 
 Usage:
     from app.llm import get_llm
@@ -13,8 +16,16 @@ import logging
 import threading
 
 from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 
-from app.config import GROQ_API_KEYS, GROQ_MODEL, GROQ_TEMPERATURE
+from app.config import (
+    GROQ_API_KEYS,
+    GROQ_MODEL,
+    GROQ_TEMPERATURE,
+    OPENAI_API_KEY,
+    OPENAI_MODEL,
+    OPENAI_TEMPERATURE,
+)
 
 logger = logging.getLogger("rift.llm")
 
@@ -45,20 +56,32 @@ def get_llm(
     *,
     temperature: float | None = None,
     model: str | None = None,
-) -> ChatGroq:
+) -> ChatGroq | ChatOpenAI:
     """
-    Return a ChatGroq instance using the next key from the round-robin pool.
+    Return an LLM client with fallback strategy:
+      1) Groq round-robin, if GROQ_API_KEYS is configured
+      2) OpenAI, if OPENAI_API_KEY is configured
+    """
+    if GROQ_API_KEYS:
+        key = _next_key()
+        return ChatGroq(
+            model=model or GROQ_MODEL,
+            temperature=temperature if temperature is not None else GROQ_TEMPERATURE,
+            api_key=key,
+        )
 
-    Every call rotates to the next key, spreading requests evenly across keys.
-    """
-    key = _next_key()
-    return ChatGroq(
-        model=model or GROQ_MODEL,
-        temperature=temperature if temperature is not None else GROQ_TEMPERATURE,
-        api_key=key,
+    if OPENAI_API_KEY:
+        return ChatOpenAI(
+            model=model or OPENAI_MODEL,
+            temperature=temperature if temperature is not None else OPENAI_TEMPERATURE,
+            api_key=OPENAI_API_KEY,
+        )
+
+    raise RuntimeError(
+        "No LLM keys configured. Set GROQ_API_KEYS or OPENAI_API_KEY in environment."
     )
 
 
 def has_llm_keys() -> bool:
-    """Return True if at least one Groq API key is configured."""
-    return bool(GROQ_API_KEYS)
+    """Return True if at least one configured provider is available."""
+    return bool(GROQ_API_KEYS or OPENAI_API_KEY)

@@ -65,13 +65,17 @@ async def commit_push(state: AgentState) -> AgentState:
             "status": "quarantined",
             "quarantine_reason": error,
             "current_node": "commit_push",
+            "pushed_this_iteration": False,
         }
 
     # Filter fixes applied in this iteration
     applied = [f for f in fixes if f.status == "applied" and not f.commit_sha]
     if not applied:
         await emit_thought(run_id, "commit_push", "No new fixes to commit", step)
-        return {"current_node": "commit_push"}
+        return {
+            "current_node": "commit_push",
+            "pushed_this_iteration": False,
+        }
 
     await emit_thought(
         run_id, "commit_push",
@@ -132,6 +136,7 @@ async def commit_push(state: AgentState) -> AgentState:
             "fixes": fixes,
             "error_message": error,
             "current_node": "commit_push",
+            "pushed_this_iteration": False,
         }
 
     # Update fix records with commit SHA
@@ -162,4 +167,5 @@ async def commit_push(state: AgentState) -> AgentState:
         "fixes": fixes,
         "total_commits": total_commits + commits_added,
         "current_node": "commit_push",
+        "pushed_this_iteration": True,
     }

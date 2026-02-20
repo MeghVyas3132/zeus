@@ -100,6 +100,7 @@ class AgentState(TypedDict, total=False):
     # ── Fix generation ────────────────────────────────
     fixes: list[FixRecord]
     total_commits: int
+    pushed_this_iteration: bool
 
     # ── CI monitoring ─────────────────────────────────
     ci_runs: list[CiRun]

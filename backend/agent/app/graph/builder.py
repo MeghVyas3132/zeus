@@ -109,9 +109,8 @@ def should_monitor_ci(state: AgentState) -> Literal["ci_monitor", "scorer"]:
     error = state.get("error_message", "")
     if error and "commit/push failed" in error.lower():
         return "scorer"
-    # If the push was skipped (no fixes to commit), also skip CI
-    fixes = state.get("fixes", [])
-    if not any(getattr(f, "commit_sha", None) for f in fixes):
+    # Monitor CI only if this iteration pushed a fresh commit.
+    if not state.get("pushed_this_iteration", False):
         return "scorer"
     return "ci_monitor"
 
@@ -229,6 +228,7 @@ async def run_agent_graph(
         "fixes": [],
         "ci_runs": [],
         "total_commits": 0,
+        "pushed_this_iteration": False,
         "start_time": time.time(),
     }
 

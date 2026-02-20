@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ...config import OPENAI_API_KEY, OPENAI_MODEL, OPENAI_TEMPERATURE
+from ...config import OPENAI_MODEL
 from ...llm import get_llm, has_llm_keys
 from ...db import insert_fix, insert_trace
 from ...events import emit_fix_applied, emit_thought
@@ -23,19 +23,118 @@ logger = logging.getLogger("rift.node.fix_generator")
 
 # ── Rule-based fixers ───────────────────────────────────────
 
-def _fix_import(failure: TestFailure, file_content: str) -> str | None:
-    """Attempt to fix ImportError / ModuleNotFoundError."""
-    # Common: `from X import Y` where X is misspelled
-    m = re.search(r"No module named '(\w+)'", failure.error_message)
-    if not m:
-        m = re.search(r"cannot import name '(\w+)'", failure.error_message)
-    if not m:
+def _extract_missing_module(error_message: str) -> str | None:
+    """Extract a missing module/package name from common import errors."""
+    patterns = [
+        r"No module named ['\"]([^'\"]+)['\"]",
+        r"cannot find module ['\"]([^'\"]+)['\"]",
+        r"Cannot find module ['\"]([^'\"]+)['\"]",
+    ]
+    for pat in patterns:
+        m = re.search(pat, error_message, re.I)
+        if m:
+            return m.group(1).strip().split(".")[0]
+    return None
+
+
+def _local_module_exists(module_name: str, repo_dir: Path, file_path: Path) -> bool:
+    """Best-effort check whether missing module likely exists in-repo."""
+    candidates = [
+        file_path.parent / f"{module_name}.py",
+        file_path.parent / module_name / "__init__.py",
+        repo_dir / f"{module_name}.py",
+        repo_dir / module_name / "__init__.py",
+    ]
+    return any(p.exists() for p in candidates)
+
+
+def _fix_import(
+    failure: TestFailure,
+    file_content: str,
+    file_path: Path,
+    repo_dir: Path,
+) -> str | None:
+    """
+    Attempt to fix ImportError / ModuleNotFoundError.
+
+    Heuristics:
+      1) Rewrite absolute local imports to relative imports in Python files.
+      2) Add missing package to requirements.txt / package.json when
+         the failure clearly points to a missing dependency.
+    """
+    missing_module = _extract_missing_module(failure.error_message)
+    if not missing_module:
         return None
 
-    # Simple heuristic: if it looks like a relative import issue, try adding .
-    bad_module = m.group(1)
-    # Check if there is a file matching the module in the repo
-    # For now, return None to let LLM handle complex cases
+    suffix = file_path.name.lower()
+
+    # requirements.txt dependency fallback
+    if suffix == "requirements.txt":
+        req_lines = file_content.splitlines()
+        normalized = {ln.strip().split("==")[0].lower() for ln in req_lines if ln.strip()}
+        if missing_module.lower() in normalized:
+            return None
+        fixed = file_content
+        if fixed and not fixed.endswith("\n"):
+            fixed += "\n"
+        fixed += f"{missing_module}\n"
+        return fixed
+
+    # package.json dependency fallback
+    if suffix == "package.json":
+        import json
+
+        try:
+            pkg = json.loads(file_content)
+        except json.JSONDecodeError:
+            return None
+
+        deps = pkg.setdefault("devDependencies", {})
+        if not isinstance(deps, dict):
+            return None
+        if missing_module in deps:
+            return None
+
+        deps[missing_module] = "latest"
+        return json.dumps(pkg, indent=2, ensure_ascii=True) + "\n"
+
+    # Source-level Python import rewrite (absolute -> relative)
+    if file_path.suffix != ".py":
+        return None
+    if not _local_module_exists(missing_module, repo_dir, file_path):
+        return None
+
+    lines = file_content.splitlines(keepends=True)
+    target_idx = max(0, min(len(lines) - 1, failure.line_number - 1))
+
+    pat_from = re.compile(
+        rf"^(\s*)from\s+{re.escape(missing_module)}(\.[\w\.]+)?\s+import\s+(.+)$"
+    )
+    pat_import = re.compile(
+        rf"^(\s*)import\s+{re.escape(missing_module)}(\.[\w\.]+)?(\s+as\s+\w+)?\s*$"
+    )
+
+    candidate_indexes = [target_idx] + [i for i in range(len(lines)) if i != target_idx]
+    for idx in candidate_indexes:
+        line = lines[idx]
+        if line.lstrip().startswith(("from .", "from ..")):
+            continue
+
+        m_from = pat_from.match(line)
+        if m_from:
+            indent, submodule, imported = m_from.groups()
+            submodule = submodule or ""
+            lines[idx] = f"{indent}from .{missing_module}{submodule} import {imported}\n"
+            return "".join(lines)
+
+        m_import = pat_import.match(line)
+        if m_import:
+            indent, submodule, alias = m_import.groups()
+            submodule = submodule or ""
+            alias = alias or ""
+            lines[idx] = f"{indent}from . import {missing_module}{submodule}{alias}\n"
+            return "".join(lines)
+
     return None
 
 
@@ -116,6 +215,15 @@ def _fix_linting(failure: TestFailure, file_content: str) -> str | None:
     return None
 
 
+def _guess_import_manifest(repo_dir: Path) -> Path | None:
+    """Pick the best manifest file for dependency-level import fixes."""
+    for rel in ("requirements.txt", "package.json"):
+        path = repo_dir / rel
+        if path.exists():
+            return path
+    return None
+
+
 _RULE_FIXERS: dict[str, Any] = {
     "IMPORT": _fix_import,
     "INDENTATION": _fix_indentation,
@@ -131,7 +239,7 @@ async def _llm_generate_fix(
 ) -> tuple[str, str] | None:
     """Use LLM to generate a fix. Returns (fixed_code, explanation) or None."""
     if not has_llm_keys():
-        logger.warning("No Groq API keys — cannot generate LLM fix")
+        logger.warning("No LLM keys configured — cannot generate LLM fix")
         return None
 
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -218,26 +326,55 @@ async def fix_generator(state: AgentState) -> AgentState:
     new_fixes: list[FixRecord] = []
 
     for i, failure in enumerate(failures):
+        repo_root = Path(repo_dir)
         # Guard against None/empty file_path from LLM fallback
         fp = failure.file_path or "unknown"
         if fp == "unknown" or not fp.strip():
-            logger.warning("Skipping failure with unknown file path: %s", failure.error_message[:100])
-            new_fixes.append(
-                FixRecord(
-                    file_path=fp,
-                    bug_type=failure.bug_type,
-                    line_number=failure.line_number,
-                    description=failure.error_message,
-                    fix_description="Unknown file path — skipped",
-                    original_code="",
-                    fixed_code="",
-                    status="skipped",
-                    confidence=0.0,
+            # For IMPORT failures we can still target dependency manifests.
+            if failure.bug_type == "IMPORT":
+                guessed = _guess_import_manifest(repo_root)
+                if guessed is not None:
+                    fp = guessed.relative_to(repo_root).as_posix()
+                    await emit_thought(
+                        run_id,
+                        "fix_generator",
+                        f"Failure had unknown file path; targeting {fp} for dependency fix",
+                        step + i + 1,
+                    )
+                else:
+                    logger.warning("Skipping failure with unknown file path: %s", failure.error_message[:100])
+                    new_fixes.append(
+                        FixRecord(
+                            file_path=fp,
+                            bug_type=failure.bug_type,
+                            line_number=failure.line_number,
+                            description=failure.error_message,
+                            fix_description="Unknown file path — skipped",
+                            original_code="",
+                            fixed_code="",
+                            status="skipped",
+                            confidence=0.0,
+                        )
+                    )
+                    continue
+            else:
+                logger.warning("Skipping failure with unknown file path: %s", failure.error_message[:100])
+                new_fixes.append(
+                    FixRecord(
+                        file_path=fp,
+                        bug_type=failure.bug_type,
+                        line_number=failure.line_number,
+                        description=failure.error_message,
+                        fix_description="Unknown file path — skipped",
+                        original_code="",
+                        fixed_code="",
+                        status="skipped",
+                        confidence=0.0,
+                    )
                 )
-            )
-            continue
+                continue
 
-        file_path = Path(repo_dir) / fp
+        file_path = repo_root / fp
         if not file_path.exists():
             logger.warning("File not found: %s", file_path)
             new_fixes.append(
@@ -262,16 +399,37 @@ async def fix_generator(state: AgentState) -> AgentState:
         model_used = "rule-based"
         fixer = _RULE_FIXERS.get(failure.bug_type)
         if fixer:
-            fixed_code = fixer(failure, original_code)
+            if failure.bug_type == "IMPORT":
+                fixed_code = fixer(failure, original_code, file_path, repo_root)
+            else:
+                fixed_code = fixer(failure, original_code)
 
         # 2. LLM fallback
         if fixed_code is None:
             llm_result = await _llm_generate_fix(failure, original_code, language)
             if llm_result:
                 fixed_code, _ = llm_result
-                model_used = OPENAI_MODEL
+                model_used = OPENAI_MODEL or "llm"
+
+        # 3. Import-specific manifest fallback (if source-level fix failed)
+        if fixed_code is None and failure.bug_type == "IMPORT":
+            manifest = _guess_import_manifest(repo_root)
+            if manifest is not None and manifest != file_path:
+                manifest_original = manifest.read_text(encoding="utf-8", errors="replace")
+                manifest_fixed = _fix_import(failure, manifest_original, manifest, repo_root)
+                if manifest_fixed and manifest_fixed != manifest_original:
+                    file_path = manifest
+                    fp = manifest.relative_to(repo_root).as_posix()
+                    original_code = manifest_original
+                    fixed_code = manifest_fixed
+                    model_used = "rule-based"
 
         if fixed_code is None:
+            await emit_thought(
+                run_id, "fix_generator",
+                f"No patch generated for {fp}:{failure.line_number} ({failure.bug_type})",
+                step + i + 1,
+            )
             new_fixes.append(
                 FixRecord(
                     file_path=fp,
